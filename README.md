@@ -18,16 +18,16 @@
 
 ## 📂 プロジェクト構成
 
-```
-news-collector/
+```news-collector/
 ├── src/
 │   ├── main.py
 │   ├── rss_sources.py
 │   ├── itmedia.py
-├── logs/            # 自動生成（.gitignoreで除外）
-├── .env             # 秘密情報（.gitignoreで除外）
-├── .gitignore
+├── logs/
 ├── auto_push.bat
+├── .env
+├── .gitignore
+├── requirements.txt
 └── README.md
 ```
 
