@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "llama3"
+MODEL_NAME = "qwen2.5"
 
 
 def fix_json_string(s: str) -> str:
