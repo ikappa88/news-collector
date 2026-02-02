@@ -1,135 +1,115 @@
 # News Collector
 
-毎日決まった時間にニュースを自動収集し、Markdown形式で保存、さらに必要に応じてメール通知も行う自動化システムです。
-**Windows タスクスケジューラ**と**Python**を組み合わせて動作します。
+News Collector は、毎日決まった時間にニュースを自動収集し、AI による要約・分類・重要度評価を行い、Markdown 形式で保存しつつ、必要に応じてメール通知も行う自動化システムです。
 
----
+Windows タスクスケジューラと Python、そしてローカル LLM（Ollama）を組み合わせて動作します。このシステムは、Yahoo!ニュースと ITmedia の最新記事を取得し、タイトルの高速分類、本文の詳細分析、STEEP 分類（Social / Technological / Economic / Environmental / Political）、重要度・影響度の評価を行います。
 
-## 🚀 主な機能
+分析結果は Markdown テーブルとして保存され、Gmail を使ってメール通知することもできます。
 
-- Yahooニュースのカテゴリ別RSS取得
-- ITmediaの最新記事取得
-- Markdown形式でのログ生成（`logs/YYYY-MM-DD.md`）
-- Gmailを使ったメール通知（ニュース全文送信）
-- GitHubへの自動push（任意）
-- タスクスケジューラによる毎日の自動実行
+## 主な機能
 
----
+- Yahoo!ニュースのカテゴリ別 RSS 取得
+- ITmedia の最新記事取得
+- タイトルの高速 LLM 分類（前処理）
+- 本文の詳細 LLM 分析（要約・分類・重要度評価）
+- 壊れた JSON の自動修復と補正
+- Markdown 形式でのレポート生成（`logs` フォルダに保存）
+- Gmail を使ったメール通知
+- Windows タスクスケジューラによる毎日の自動実行
+- 必要に応じて GitHub への自動 push（任意）
 
-## 📂 プロジェクト構成
+## STEEP 分類
 
-```news-collector/
-├── src/
-│   ├── main.py
-│   ├── rss_sources.py
-│   ├── itmedia.py
-├── logs/
-├── auto_push.bat
-├── .env
+分析結果は以下の 5 分類のいずれかに強制的に補正されます。
+
+- **Social**
+- **Technological**
+- **Economic**
+- **Environmental**
+- **Political**
+
+## プロジェクト構成
+
+```
+news-collector
+├── src/                    # 主要ロジック
+│   ├── main.py            # 全体の実行フロー
+│   ├── llm_analyzer.py    # 本文の詳細分析
+│   ├── llm_title_filter.py # タイトルの高速分類
+│   ├── rss_sources.py     # RSS 取得
+│   ├── yahoo_article.py   # Yahoo本文取得
+│   ├── itmedia_article.py # ITmedia本文取得
+│   ├── itmedia.py         # ITmedia RSS
+│   └── table_formatter.py # Markdown テーブル生成
+├── logs/                   # レポートとエラーログ
+│   ├── sent_YYYY-MM-DD_HHMM.md  # 送信済みレポート
+│   └── error_YYYY-MM-DD_HHMM.txt # エラーログ
+├── .env                    # Gmail 認証情報
 ├── .gitignore
 ├── requirements.txt
 └── README.md
 ```
 
----
+## 環境変数（.env）
 
-## 🔐 環境変数（`.env`）
+メールアドレスやアプリパスワードなどの秘密情報は `.env` に保存します。このファイルは GitHub に公開されません。
 
-このプロジェクトでは、メールアドレスやアプリパスワードなどの秘密情報を `.env` に保存します。
-`.env` は `.gitignore` によりGitHubへは公開されません。
-
-**`.env` の例：**
-```
-GMAIL_ADDRESS=your@gmail.com
-GMAIL_APP_PASSWORD=your_app_password
-GMAIL_TO=destination@example.com
+```env
+GMAIL_ADDRESS=あなたの Gmail
+GMAIL_APP_PASSWORD=アプリパスワード
+GMAIL_TO=送信先メールアドレス
 ```
 
----
+## セットアップ手順
 
-## 🛠 セットアップ手順
+1. **仮想環境を作成する**
+   ```bash
+   python -m venv .venv
+   ```
 
-### 1. 仮想環境の作成
+2. **仮想環境を有効化する**
+   - Windows: `.venv\Scripts\activate`
+   - Mac/Linux: `source .venv/bin/activate`
 
-```sh
-python -m venv .venv
-```
+3. **依存パッケージをインストールする**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### 2. 仮想環境の有効化
+4. **Ollama でモデルを準備する**
+   ```bash
+   ollama pull qwen2.5
+   ```
 
-```sh
-.venv\Scripts\activate  # Windows の場合
-```
-または
-```sh
-source .venv/bin/activate  # Mac/Linux の場合
-```
+5. **`.env` を作成して Gmail の設定を記入する**
 
-### 3. 依存パッケージのインストール
+6. **実行する**
+   ```bash
+   python src/main.py
+   ```
 
-```sh
-pip install -r requirements.txt
-```
+## 自動実行（Windows タスクスケジューラ）
 
-必要に応じて `requirements.txt` を作成してください。
-
----
-
-## ✉️ Gmail の設定
-
-1. Googleアカウントで「2段階認証」を有効化
-2. 「アプリパスワード」を発行
-3. `.env` に反映
-
----
-
-## 🖥 自動実行（Windows タスクスケジューラ）
-
-1. **タスクスケジューラ**を開く
+1. タスクスケジューラを開く
 2. 新しいタスクを作成
-3. 「操作」で以下を設定：
+3. **操作**で以下を設定
+   - プログラム: `C:\Windows\System32\cmd.exe`
+   - 引数: `/c "C:\path\to\news-collector\auto_push.bat"`
+   - 開始位置: `C:\path\to\news-collector`
+4. **トリガー**で毎日実行時間を指定
 
-    - **プログラム**:
-      `C:\Windows\System32\cmd.exe`
-    - **引数**:
-      `/c "C:\path\to\news-collector\auto_push.bat"`
-    - **開始（Start in）**:
-      `C:\path\to\news-collector`
+## ログについて
 
-4. トリガーで毎日8:00等、お好きな時間を指定
+### 成功ログ（送信済みレポート）
 
----
+`logs/sent_YYYY-MM-DD_HHMM.md`
 
-## 📝 ログ生成例
+### エラーログ（本文取得失敗・LLMエラーなど）
 
-```
-## Yahooニュース: 国内
-- [ニュースタイトル1](リンク1)
-- [ニュースタイトル2](リンク2)
-...
+`logs/error_YYYY-MM-DD_HHMM.txt`
 
-## ITmedia
-- [ITmedia記事タイトル1](リンク1)
-...
-```
+## 注意事項
 
----
-
-## 📧 メール通知について
-
-`main.py` の最後で、生成した最新ログファイルの内容をメール本文として送信します。
-
----
-
-## 🤝 ライセンス
-
-MIT License（必要に応じて変更してください）
-
----
-
-## 📌 注意事項
-
-- `.env` や `logs/` フォルダはGitHubに公開されません
-- Gmailのアプリパスワードは**絶対に共有しないこと**
-- 公開に必要な情報だけをコミットしてください
-
+- `.env` や `logs` フォルダは GitHub に公開されません
+- Gmail のアプリパスワードは絶対に共有しないこと
+- 公開に不要なファイルはコミットしないこと
