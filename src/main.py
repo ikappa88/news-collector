@@ -4,13 +4,12 @@ load_dotenv()
 
 import os
 import time
-from datetime import datetime  # ★ これが必要！
-
-from rss_sources import fetch_yahoo_rss
-from itmedia import fetch_itmedia
+from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
 
+from rss_sources import fetch_yahoo_rss
+from itmedia import fetch_itmedia
 from yahoo_article import fetch_yahoo_article_body
 from itmedia_article import fetch_itmedia_article_body
 from llm_analyzer import analyze_news_with_llm
@@ -19,24 +18,27 @@ from llm_title_filter import analyze_title_fast
 
 print("main.py started")
 
-# ★ 実行開始時刻
+# ★ 全体処理開始時間
 start_time = time.time()
 
 
+def log_error(message: str):
+    """エラーを logs/error_*.txt に保存"""
+    os.makedirs("logs", exist_ok=True)
+    now = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    path = os.path.join("logs", f"error_{now}.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(message)
+    print(f"[ERROR] Logged to {path}")
+
+
 def collect_and_analyze_news():
-    """
-    Yahooニュース & ITmedia のニュースを収集し、
-    タイトルで前捌き → 本文取得 → LLM詳細分析 → レコード化 まで行う。
-    """
-    # -----------------------------
-    # 1. RSS取得
-    # -----------------------------
     print("Fetching Yahoo RSS...")
     try:
         yahoo_data = fetch_yahoo_rss()
         print("Yahoo RSS fetched")
     except Exception as e:
-        print(f"Yahoo RSS error: {e}")
+        log_error(f"Yahoo RSS error: {e}")
         yahoo_data = []
 
     print("Fetching ITmedia...")
@@ -44,13 +46,11 @@ def collect_and_analyze_news():
         itmedia_items = fetch_itmedia()
         print("ITmedia fetched")
     except Exception as e:
-        print(f"ITmedia error: {e}")
+        log_error(f"ITmedia error: {e}")
         itmedia_items = []
 
-    # -----------------------------
-    # 2. タイトルで前捌き（高速判定）
-    # -----------------------------
-    buckets = {}  # STEEPごとのバケット
+    # タイトル前捌き
+    buckets = {}
 
     # Yahoo
     for category_data in yahoo_data:
@@ -64,16 +64,14 @@ def collect_and_analyze_news():
                 continue
 
             steep = fast.get("steep_category", "").strip()
-            news_importance = int(fast.get("news_importance", 0) or 0)
-            company_impact = int(fast.get("company_impact", 0) or 0)
-            score = news_importance + company_impact
-
-            if not steep:
-                continue
-
-            buckets.setdefault(steep, []).append(
-                (score, {"source": "yahoo", "item": item})
+            score = int(fast.get("news_importance", 0)) + int(
+                fast.get("company_impact", 0)
             )
+
+            if steep:
+                buckets.setdefault(steep, []).append(
+                    (score, {"source": "yahoo", "item": item})
+                )
 
     # ITmedia
     for item in itmedia_items:
@@ -86,31 +84,20 @@ def collect_and_analyze_news():
             continue
 
         steep = fast.get("steep_category", "").strip()
-        news_importance = int(fast.get("news_importance", 0) or 0)
-        company_impact = int(fast.get("company_impact", 0) or 0)
-        score = news_importance + company_impact
+        score = int(fast.get("news_importance", 0)) + int(fast.get("company_impact", 0))
 
-        if not steep:
-            continue
+        if steep:
+            buckets.setdefault(steep, []).append(
+                (score, {"source": "itmedia", "item": item})
+            )
 
-        buckets.setdefault(steep, []).append(
-            (score, {"source": "itmedia", "item": item})
-        )
-
-    # -----------------------------
-    # 3. STEEPごとに上位5件を選抜
-    # -----------------------------
+    # 上位5件
     selected_entries = []
-
     for steep, entries in buckets.items():
         entries.sort(key=lambda x: x[0], reverse=True)
-        top5 = entries[:5]
-        for _, entry in top5:
-            selected_entries.append(entry)
+        selected_entries.extend([entry for _, entry in entries[:5]])
 
-    # -----------------------------
-    # 4. 選抜されたニュースだけ本文取得 → LLM詳細分析
-    # -----------------------------
+    # 本文取得 → LLM 詳細分析
     records = []
 
     for entry in selected_entries:
@@ -122,22 +109,35 @@ def collect_and_analyze_news():
         date = item.get("pubDate") or item.get("dc:date") or ""
 
         if not link:
+            log_error(f"Missing link for title: {title}")
             continue
 
-        if source == "itmedia":
-            body_text = fetch_itmedia_article_body(link)
-        else:
-            body_text = fetch_yahoo_article_body(link)
+        # 本文取得
+        try:
+            if source == "itmedia":
+                body_text = fetch_itmedia_article_body(link)
+            else:
+                body_text = fetch_yahoo_article_body(link)
+        except Exception as e:
+            log_error(f"Article fetch error: {title}\n{e}")
+            continue
 
+        # ★ LLM 処理時間計測
+        llm_start = time.time()
         record = analyze_news_with_llm(
             title=title,
             date=date,
             source_url=link,
             body_text=body_text,
         )
+        llm_elapsed = time.time() - llm_start
+        print(f"LLM processed: {title[:20]}... ({llm_elapsed:.2f} sec)")
 
         if record:
+            record["llm_time"] = llm_elapsed
             records.append(record)
+        else:
+            log_error(f"LLM returned None for: {title}")
 
     return records
 
@@ -164,21 +164,21 @@ if __name__ == "__main__":
     print("Generating markdown table...")
     table_md = records_to_markdown_table(records)
 
-    # 送信内容をログとして保存
+    # 送信内容ログ保存
     now = datetime.now().strftime("%Y-%m-%d_%H%M")
     log_path = os.path.join("logs", f"sent_{now}.md")
+    os.makedirs("logs", exist_ok=True)
 
     with open(log_path, "w", encoding="utf-8") as f:
         f.write(table_md)
 
-    # ★ 生成時間を追記
-    elapsed = time.time() - start_time
+    # ★ 全体処理時間を追記
+    total_elapsed = time.time() - start_time
     with open(log_path, "a", encoding="utf-8") as f:
-        f.write(f"\n\n---\n生成にかかった時間: {elapsed:.2f} 秒\n")
+        f.write(f"\n\n---\n生成にかかった時間: {total_elapsed:.2f} 秒\n")
 
     print(f"Saved sent log: {log_path}")
 
-    # メール送信
     print("Sending email...")
     send_email_notification("ニュース分析結果", table_md)
     print("Email sent.")
