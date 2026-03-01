@@ -1,115 +1,113 @@
-# News Collector
+# news-collector
 
-News Collector は、毎日決まった時間にニュースを自動収集し、AI による要約・分類・重要度評価を行い、Markdown 形式で保存しつつ、必要に応じてメール通知も行う自動化システムです。
+LLM（Ollama）を使って複数のニュースソースを自動収集・要約し、Markdownダイジェストをメールで配信するツール。
 
-Windows タスクスケジューラと Python、そしてローカル LLM（Ollama）を組み合わせて動作します。このシステムは、Yahoo!ニュースと ITmedia の最新記事を取得し、タイトルの高速分類、本文の詳細分析、STEEP 分類（Social / Technological / Economic / Environmental / Political）、重要度・影響度の評価を行います。
+## 機能
 
-分析結果は Markdown テーブルとして保存され、Gmail を使ってメール通知することもできます。
+- 複数ソースからニュースを並列取得
+- ローカルLLM（qwen2.5）で日本語要約・タイトル翻訳・カテゴリ分類
+- Markdownダイジェストを自動生成・メール送信
+- キャッシュ機能でデバッグ時の繰り返し実行を高速化
 
-## 主な機能
+## ニュースソース構成
 
-- Yahoo!ニュースのカテゴリ別 RSS 取得
-- ITmedia の最新記事取得
-- タイトルの高速 LLM 分類（前処理）
-- 本文の詳細 LLM 分析（要約・分類・重要度評価）
-- 壊れた JSON の自動修復と補正
-- Markdown 形式でのレポート生成（`logs` フォルダに保存）
-- Gmail を使ったメール通知
-- Windows タスクスケジューラによる毎日の自動実行
-- 必要に応じて GitHub への自動 push（任意）
+| ブロック | ソース | 言語 | 最大件数 |
+|---|---|---|---|
+| 第1 | Yahoo!ニュース（主要・国内・経済・IT/科学） | 日本語 | 各20件 → TOP10統合 |
+| 第2 | BBC World | 英語 | 20件 |
+| 第3 | Hacker News（公式API） | 英語 | 20件 |
 
-## STEEP 分類
-
-分析結果は以下の 5 分類のいずれかに強制的に補正されます。
-
-- **Social**
-- **Technological**
-- **Economic**
-- **Environmental**
-- **Political**
-
-## プロジェクト構成
+## ファイル構成
 
 ```
-news-collector
-├── src/                    # 主要ロジック
-│   ├── main.py            # 全体の実行フロー
-│   ├── llm_analyzer.py    # 本文の詳細分析
-│   ├── llm_title_filter.py # タイトルの高速分類
-│   ├── rss_sources.py     # RSS 取得
-│   ├── yahoo_article.py   # Yahoo本文取得
-│   ├── itmedia_article.py # ITmedia本文取得
-│   ├── itmedia.py         # ITmedia RSS
-│   └── table_formatter.py # Markdown テーブル生成
-├── logs/                   # レポートとエラーログ
-│   ├── sent_YYYY-MM-DD_HHMM.md  # 送信済みレポート
-│   └── error_YYYY-MM-DD_HHMM.txt # エラーログ
-├── .env                    # Gmail 認証情報
-├── .gitignore
+news-collector/
+├── .env                   # APIキー・メール設定
+├── README.md
 ├── requirements.txt
-└── README.md
+└── src/
+    ├── main.py            # エントリポイント・並列処理オーケストレーション
+    ├── hackernews.py      # HN Firebase API取得
+    ├── yahoo_news.py      # Yahoo!ニュースRSS取得
+    ├── jp_news.py         # BBC World RSS取得
+    ├── llm_analyzer.py    # LLM分析（要約・翻訳・カテゴリ・スコア）
+    ├── llm_title_filter.py# タイトル高速フィルタ（LLM）
+    └── table_formatter.py # Markdownダイジェスト生成
 ```
 
-## 環境変数（.env）
+## セットアップ
 
-メールアドレスやアプリパスワードなどの秘密情報は `.env` に保存します。このファイルは GitHub に公開されません。
+### 1. 必要パッケージのインストール
 
-```env
-GMAIL_ADDRESS=あなたの Gmail
-GMAIL_APP_PASSWORD=アプリパスワード
-GMAIL_TO=送信先メールアドレス
+```bash
+pip install requests python-dotenv beautifulsoup4
 ```
 
-## セットアップ手順
+### 2. Ollama のインストールとモデル取得
 
-1. **仮想環境を作成する**
-   ```bash
-   python -m venv .venv
-   ```
+```bash
+# Ollamaインストール後
+ollama pull qwen2.5
+```
 
-2. **仮想環境を有効化する**
-   - Windows: `.venv\Scripts\activate`
-   - Mac/Linux: `source .venv/bin/activate`
+### 3. `.env` の設定
 
-3. **依存パッケージをインストールする**
-   ```bash
-   pip install -r requirements.txt
-   ```
+```ini
+# NewsAPI（オプション）
+NEWSAPI_KEY=your_key_here
 
-4. **Ollama でモデルを準備する**
-   ```bash
-   ollama pull qwen2.5
-   ```
+# Gmail送信設定
+GMAIL_ADDRESS=your@gmail.com
+GMAIL_APP_PASSWORD=your_app_password
+GMAIL_TO=recipient@gmail.com
+```
 
-5. **`.env` を作成して Gmail の設定を記入する**
+> Gmail App Passwordの取得：Googleアカウント → セキュリティ → 2段階認証 → アプリパスワード
 
-6. **実行する**
-   ```bash
-   python src/main.py
-   ```
+### 4. 実行
 
-## 自動実行（Windows タスクスケジューラ）
+```bash
+python src/main.py
+```
 
-1. タスクスケジューラを開く
-2. 新しいタスクを作成
-3. **操作**で以下を設定
-   - プログラム: `C:\Windows\System32\cmd.exe`
-   - 引数: `/c "C:\path\to\news-collector\auto_push.bat"`
-   - 開始位置: `C:\path\to\news-collector`
-4. **トリガー**で毎日実行時間を指定
+## カテゴリ定義
 
-## ログについて
+### Yahoo! / 国内ニュース用
+| カテゴリ | 絵文字 |
+|---|---|
+| 政治・行政 | 🏛️ |
+| 経済・産業 | 💹 |
+| 国際 | 🌏 |
+| 社会・事件 | 📰 |
+| 科学・環境 | 🔬 |
+| 文化・スポーツ | 🎭 |
 
-### 成功ログ（送信済みレポート）
+### Hacker News用
+| カテゴリ | 絵文字 |
+|---|---|
+| AI / ML | 🤖 |
+| Dev Tools | 🛠️ |
+| Security | 🔒 |
+| Infra / Cloud | ☁️ |
+| Business | 💼 |
+| Science | 🔬 |
+| Policy / Law | 🏛️ |
 
-`logs/sent_YYYY-MM-DD_HHMM.md`
+## 新しいニュースソースの追加方法
 
-### エラーログ（本文取得失敗・LLMエラーなど）
+1. `src/` に `xxx_news.py` を作成（`fetch_xxx() -> dict[str, list[dict]]` を実装）
+2. `table_formatter.py` の `BLOCKS` リストにブロック定義を追加
+3. `main.py` の `__main__` ブロックに収集処理を追加
 
-`logs/error_YYYY-MM-DD_HHMM.txt`
+## 出力例
+
+```
+logs/result_2026-03-01_120000.md  ← Markdownダイジェスト
+logs/error_*.txt                  ← エラーログ
+.cache/hn_top.json                ← HNキャッシュ（デバッグ用）
+```
 
 ## 注意事項
 
-- `.env` や `logs` フォルダは GitHub に公開されません
-- Gmail のアプリパスワードは絶対に共有しないこと
-- 公開に不要なファイルはコミットしないこと
+- Yahoo!ニュースRSSは個人利用の範囲で使用してください
+- Ollamaがローカルで起動している必要があります（`ollama serve`）
+- 実行時間の目安：約2〜3分（ソース数・記事数による）
